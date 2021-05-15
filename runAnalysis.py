@@ -10,7 +10,8 @@ from aircraftDelay import AircraftDelay
 pd.set_option('display.max_columns', 30)
 
 ad = AircraftDelay()
-ad.parseData('2017.csv')
+# ad.parseData('2017.csv')
 # initialPlots()
+ad.createMLdf()
 
 plt.show()
