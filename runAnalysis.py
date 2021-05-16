@@ -10,15 +10,16 @@ from classify import Classify
 
 pd.set_option('display.max_columns', 30)
 
-ad = Preprocess()
-cl = Classify()
+ad = Preprocess(airport='EWR')
 # ad.parseData('2017.csv')
-# # initialPlots()
+# ad.filterByAirport()
 # ad.createMLdf()
 
-# cl.runSVM()
-# cl.runLogistic()
-cl.runNeuralNet()
+cl = Classify()
+# cl.runLogistic(C=0.01)
+# cl.runSVM(C=50)
+# cl.runNeuralNet()
+cl.runTree()
 
 
 plt.show()

@@ -16,8 +16,9 @@ pd.set_option('display.max_columns', 30)
 
 class Preprocess:
 
-    def __init__(self):
+    def __init__(self, airport='BOS'):
         self.datadir = '../data/'
+        self.airport = airport
 
     def parseData(self, filename):
         print('Loading data...')
@@ -26,20 +27,28 @@ class Preprocess:
         # drop the variables that will not be considered
         df = df[['FL_DATE', 'OP_CARRIER', 'ORIGIN', 'DEST', 'DISTANCE', 'CRS_DEP_TIME', 
                     'CRS_ARR_TIME', 'CRS_ELAPSED_TIME', 'ARR_DELAY', 'CANCELLED', 'DIVERTED']]
-        print('Filtering airport...')
-        df = self.filterByAirport(df, airport='BOS')
 
         print('Factoring delay variable...')
-        # factor the delay variable and apply OR with cancel/divert
+        # factor the delay variable and apply LOGICAL_OR with cancel/divert
         delay_factor = pd.cut(df.ARR_DELAY, [-9999, 15, 9999], right=False, labels=[0,1]).to_numpy()
         cancelDivert = np.logical_or(df.CANCELLED.to_numpy(), df.DIVERTED.to_numpy())
         df['ARR_DELAY'] = np.logical_or(delay_factor, cancelDivert).astype(int)
         df = df.drop(['CANCELLED', 'DIVERTED'], axis=1)
 
-        print(df.info())
+        # print(df.info())
         print('Number of Null Entries:')
         print(df.isnull().sum())
-        df.to_csv(self.datadir + 'parsedData.csv')
+
+        df = df.dropna(axis=0)
+        print('Deleted rows with null entries.')
+
+        # analyze flight date
+        print('\nAnalyzing flight date...')
+        dayofweek, dayofyear, month, flightsinday = self.analyzeFlightDate(df.FL_DATE)  
+        df['DAY_OF_WEEK'] = dayofweek.tolist()
+        df['FLIGHTS_IN_DAY'] = flightsinday.tolist()
+
+        df.to_csv(self.datadir + 'parsedData.csv', index=False)
 
     def analyzeFlightDate(self, fl_date):
         dates_str = fl_date.tolist()
@@ -49,7 +58,7 @@ class Preprocess:
         flightsbyday = np.zeros(ndays) # number of scheduled flights on each calendar day
 
         # categorize the date in several ways
-        dayofweek = np.zeros(n, dtype='U2')
+        dayofweek = np.zeros(n, dtype='U3')
         dayofyear = np.zeros(n)
         month = np.zeros(n)
         flightsinday = np.zeros(n)
@@ -65,7 +74,81 @@ class Preprocess:
             flightsinday[i] = flightsbyday[int(dayofyear[i]-1)]
         return dayofweek, dayofyear, month, flightsinday
 
+    def filterByAirport(self):
+        df = pd.read_csv(self.datadir + 'parsedData.csv')
 
+        print('Filtering airport...')
+        n = max(df.count(axis=0))
+        rowsToKeep = []
+        for i in range(n):
+            # if (df.ORIGIN[i] == 'BOS' and df.DEST[i] == 'JFK') or (df.ORIGIN[i] == 'JFK' and df.DEST[i] == 'BOS'):
+            if df.ORIGIN[i] == self.airport or df.DEST[i] == self.airport:
+                rowsToKeep = rowsToKeep + [i]
+
+        df.iloc[rowsToKeep, :].to_csv(self.datadir + 'parsedData_' + self.airport + '.csv', index=False)
+
+    def evenOutTrainData(self, X_train, y_train):
+        # Makes the training data have a similar number of delayed vs non-delayed entries
+        X_train  = X_train.reset_index(drop=True)
+        y_train  = y_train.reset_index(drop=True)
+
+        ylist = y_train.ARR_DELAY.tolist()
+        length = len(ylist)
+        num1 = ylist.count(1)
+        num0 = length - num1
+        indlist = y_train.index.to_numpy()
+        indToRemove = []
+        
+
+
+        # for i in range(num0 - num1):
+        while num0 > num1:
+            rand = np.random.randint(0, length)
+            if y_train.ARR_DELAY[rand] == 0 and (rand not in indToRemove):
+                indToRemove = indToRemove + [rand]
+                num0 = num0 - 1
+        X_train = X_train.drop(labels=indToRemove, axis=0)
+        y_train = y_train.drop(labels=indToRemove, axis=0)
+
+        print(y_train)
+
+        return X_train, y_train
+
+    def createMLdf(self):
+
+        df = pd.read_csv(self.datadir + 'parsedData_' + self.airport + '.csv')
+
+        # filter by airport
+        # print('Filtering airport...')
+        # df = self.filterByAirport(df, airport='EWR')
+
+        print(df.info())
+
+        # convert time to hour of the day
+        df['CRS_DEP_TIME'] = df.CRS_DEP_TIME.to_numpy() // 100
+        df['CRS_ARR_TIME'] = df.CRS_ARR_TIME.to_numpy() // 100
+
+        varML = ['DAY_OF_WEEK','FLIGHTS_IN_DAY','OP_CARRIER','ORIGIN','DEST','DISTANCE','CRS_DEP_TIME','CRS_ARR_TIME','CRS_ELAPSED_TIME']
+        varEncode = ['DAY_OF_WEEK', 'OP_CARRIER','ORIGIN','DEST','CRS_DEP_TIME','CRS_ARR_TIME']
+        varOther = ['FLIGHTS_IN_DAY', 'DISTANCE', 'CRS_ELAPSED_TIME']
+
+        X_train, X_test, y_train, y_test = train_test_split(df[varML], df[['ARR_DELAY']], test_size=0.3,random_state=10)
+
+        X_train = pd.concat([X_train[varOther], pd.get_dummies(X_train[varEncode])], axis=1)
+        X_test = pd.concat([X_test[varOther], pd.get_dummies(X_test[varEncode])], axis=1)
+        
+        print('Evening out training samples...')
+        X_train, y_train = self.evenOutTrainData(X_train, y_train)
+
+        print(X_train)
+        print(y_train)
+
+        X_train.to_csv(self.datadir + 'X_train.csv', index=False)
+        X_test.to_csv(self.datadir + 'X_test.csv', index=False)
+        y_train.to_csv(self.datadir + 'y_train.csv', index=False)
+        y_test.to_csv(self.datadir + 'y_test.csv', index=False)
+
+    '''
     def createplotdf(self):
         df = pd.read_csv(self.datadir + 'parsedData.csv')
 
@@ -95,67 +178,7 @@ class Preprocess:
         np.savetxt(self.datadir + 'dests.txt', destLabel, fmt='%s')
 
         df.to_csv(self.datadir + 'dataPlot.csv')
-
-    def filterByAirport(self, df, airport='BOS'):
-        n = max(df.count(axis=0))
-        rowsToKeep = []
-        for i in range(n):
-            if (df.ORIGIN[i] == 'BOS' and df.DEST[i] == 'JFK') or (df.ORIGIN[i] == 'JFK' and df.DEST[i] == 'BOS'):
-                rowsToKeep = rowsToKeep + [i]
-        return df.iloc[rowsToKeep, :]
-
-    def evenOutTrainData(self, X_train, y_train):
-        # Makes the training data have a similar number of delayed vs non-delayed entries
-        ylist = y_train.ARR_DELAY.tolist()
-        length = len(ylist)
-        num1 = ylist.count(1)
-        num0 = length - num1
-
-        indlist = y_train.index.to_numpy()
-        while num0 > num1:
-            rand = np.random.randint(0, length)
-            if y_train.ARR_DELAY[indlist[rand]] == 0:
-                X_train.drop(labels=indlist[rand], axis=0)
-                y_train.drop(labels=indlist[rand], axis=0)
-                indlist = np.delete(indlist, rand)
-                num0 = num0 - 1
-                length = length - 1
-        return X_train, y_train
-
-            
-
-
-
-    def createMLdf(self):
-
-        df = pd.read_csv(self.datadir + 'parsedData.csv')
-
-        # analyze flight date
-        dayofweek, dayofyear, month, flightsinday = self.analyzeFlightDate(df.FL_DATE)  
-        df['DAY_OF_WEEK'] = dayofweek.tolist()
-        df['FLIGHTS_IN_DAY'] = flightsinday.tolist()
-
-        # convert time to hour of the day
-        df['CRS_DEP_TIME'] = df.CRS_DEP_TIME.to_numpy() // 100
-        df['CRS_ARR_TIME'] = df.CRS_ARR_TIME.to_numpy() // 100
-
-        varML = ['DAY_OF_WEEK','FLIGHTS_IN_DAY','OP_CARRIER','ORIGIN','DEST','DISTANCE','CRS_DEP_TIME','CRS_ARR_TIME','CRS_ELAPSED_TIME']
-        varEncode = ['DAY_OF_WEEK', 'OP_CARRIER','ORIGIN','DEST','CRS_DEP_TIME','CRS_ARR_TIME']
-        varOther = ['FLIGHTS_IN_DAY', 'DISTANCE', 'CRS_ELAPSED_TIME']
-
-        X_train, X_test, y_train, y_test = train_test_split(df[varML], df[['ARR_DELAY']], test_size=0.3,random_state=10)
-
-        X_train = pd.concat([X_train[varOther], pd.get_dummies(X_train[varEncode])], axis=1)
-        X_test = pd.concat([X_test[varOther], pd.get_dummies(X_test[varEncode])], axis=1)
-        
-        X_train, y_train = self.evenOutTrainData(X_train, y_train)
-
-        X_train.to_csv(self.datadir + 'X_train.csv', index=False)
-        X_test.to_csv(self.datadir + 'X_test.csv', index=False)
-        y_train.to_csv(self.datadir + 'y_train.csv', index=False)
-        y_test.to_csv(self.datadir + 'y_test.csv', index=False)
-
-    
+    '''
 
     def barPlot(self, x, y, n, xlabels=None, varName=''):
         total = np.zeros(n)
