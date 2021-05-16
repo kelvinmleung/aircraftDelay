@@ -5,13 +5,20 @@ import datetime
 
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.model_selection import train_test_split
-from aircraftDelay import AircraftDelay 
+from preprocess import Preprocess
+from classify import Classify 
 
 pd.set_option('display.max_columns', 30)
 
-ad = AircraftDelay()
+ad = Preprocess()
+cl = Classify()
 # ad.parseData('2017.csv')
-# initialPlots()
-ad.createMLdf()
+# # initialPlots()
+# ad.createMLdf()
+
+# cl.runSVM()
+# cl.runLogistic()
+cl.runNeuralNet()
+
 
 plt.show()
