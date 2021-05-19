@@ -9,6 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 
+
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 
@@ -16,9 +17,10 @@ pd.set_option('display.max_columns', 30)
 
 class Preprocess:
 
-    def __init__(self, airport='BOS'):
+    def __init__(self, airportList=['BOS', 'JFK']):
         self.datadir = '../data/'
-        self.airport = airport
+        self.airportList = airportList
+
 
     def parseData(self, filename):
         print('Loading data...')
@@ -46,6 +48,8 @@ class Preprocess:
         print('\nAnalyzing flight date...')
         dayofweek, dayofyear, month, flightsinday = self.analyzeFlightDate(df.FL_DATE)  
         df['DAY_OF_WEEK'] = dayofweek.tolist()
+        df['DAY_OF_YEAR'] = dayofyear.tolist()
+        df['MONTH'] = month.tolist()
         df['FLIGHTS_IN_DAY'] = flightsinday.tolist()
 
         df.to_csv(self.datadir + 'parsedData.csv', index=False)
@@ -68,7 +72,7 @@ class Preprocess:
             y = int(dates_str[i][:4])
             m = int(dates_str[i][5:7])
             d = int(dates_str[i][8:])
-            dayofweek[i] = datetime.date(y,m,d).strftime('%a')
+            dayofweek[i] = datetime.date(y,m,d).strftime('%w')
             dayofyear[i] = datetime.date(y,m,d).strftime('%-j')
             month[i] = m
             flightsinday[i] = flightsbyday[int(dayofyear[i]-1)]
@@ -82,10 +86,10 @@ class Preprocess:
         rowsToKeep = []
         for i in range(n):
             # if (df.ORIGIN[i] == 'BOS' and df.DEST[i] == 'JFK') or (df.ORIGIN[i] == 'JFK' and df.DEST[i] == 'BOS'):
-            if df.ORIGIN[i] == self.airport or df.DEST[i] == self.airport:
+            if df.ORIGIN[i] in self.airportList and df.DEST[i] in self.airportList:
                 rowsToKeep = rowsToKeep + [i]
 
-        df.iloc[rowsToKeep, :].to_csv(self.datadir + 'parsedData_' + self.airport + '.csv', index=False)
+        df.iloc[rowsToKeep, :].to_csv(self.datadir + 'parsedData_' + str(len(self.airportList)) + 'airports.csv', index=False)
 
     def evenOutTrainData(self, X_train, y_train):
         # Makes the training data have a similar number of delayed vs non-delayed entries
@@ -98,8 +102,6 @@ class Preprocess:
         num0 = length - num1
         indlist = y_train.index.to_numpy()
         indToRemove = []
-        
-
 
         # for i in range(num0 - num1):
         while num0 > num1:
@@ -107,6 +109,7 @@ class Preprocess:
             if y_train.ARR_DELAY[rand] == 0 and (rand not in indToRemove):
                 indToRemove = indToRemove + [rand]
                 num0 = num0 - 1
+            print(num0, num1)
         X_train = X_train.drop(labels=indToRemove, axis=0)
         y_train = y_train.drop(labels=indToRemove, axis=0)
 
@@ -115,12 +118,10 @@ class Preprocess:
         return X_train, y_train
 
     def createMLdf(self):
+        print('Creating data frame for ML...')
+        # df = pd.read_csv(self.datadir + 'parsedData_' + str(len(self.airportList)) + 'airports.csv')
+        df = pd.read_csv(self.datadir + 'parsedData.csv')
 
-        df = pd.read_csv(self.datadir + 'parsedData_' + self.airport + '.csv')
-
-        # filter by airport
-        # print('Filtering airport...')
-        # df = self.filterByAirport(df, airport='EWR')
 
         print(df.info())
 
@@ -129,92 +130,70 @@ class Preprocess:
         df['CRS_ARR_TIME'] = df.CRS_ARR_TIME.to_numpy() // 100
 
         varML = ['DAY_OF_WEEK','FLIGHTS_IN_DAY','OP_CARRIER','ORIGIN','DEST','DISTANCE','CRS_DEP_TIME','CRS_ARR_TIME','CRS_ELAPSED_TIME']
-        varEncode = ['DAY_OF_WEEK', 'OP_CARRIER','ORIGIN','DEST','CRS_DEP_TIME','CRS_ARR_TIME']
+        varOneHot = ['DAY_OF_WEEK', 'OP_CARRIER','ORIGIN','DEST','CRS_DEP_TIME','CRS_ARR_TIME']
         varOther = ['FLIGHTS_IN_DAY', 'DISTANCE', 'CRS_ELAPSED_TIME']
 
         X_train, X_test, y_train, y_test = train_test_split(df[varML], df[['ARR_DELAY']], test_size=0.3,random_state=10)
 
-        X_train = pd.concat([X_train[varOther], pd.get_dummies(X_train[varEncode])], axis=1)
-        X_test = pd.concat([X_test[varOther], pd.get_dummies(X_test[varEncode])], axis=1)
+        X_train = pd.concat([X_train[varOther], pd.get_dummies(X_train[varOneHot])], axis=1)
+        X_test = pd.concat([X_test[varOther], pd.get_dummies(X_test[varOneHot])], axis=1)
         
+        print(len(X_train.columns))
+
         print('Evening out training samples...')
         X_train, y_train = self.evenOutTrainData(X_train, y_train)
 
         print(X_train)
         print(y_train)
 
+        print('Saving data...')
         X_train.to_csv(self.datadir + 'X_train.csv', index=False)
         X_test.to_csv(self.datadir + 'X_test.csv', index=False)
         y_train.to_csv(self.datadir + 'y_train.csv', index=False)
         y_test.to_csv(self.datadir + 'y_test.csv', index=False)
-
-    '''
+    
     def createplotdf(self):
+        
         df = pd.read_csv(self.datadir + 'parsedData.csv')
-
-        # analyze flight date
-        dayofweek, dayofyear, month, flightsinday = self.analyzeFlightDate(df.FL_DATE)  
-        df['FLIGHTS_IN_DAY'] = flightsinday.tolist()
-        df['DAY_OF_WEEK'], dayWeekLabel = pd.factorize(dayofweek)
-        df['DAY_OF_YEAR'], dayYearLabel = pd.factorize(dayofyear)
-        df['MONTH'], monthLabel = pd.factorize(month)
         
         # convert time to hour of the day
         df['CRS_DEP_TIME'] = df.CRS_DEP_TIME.to_numpy() // 100
         df['CRS_ARR_TIME'] = df.CRS_ARR_TIME.to_numpy() // 100
 
-        # factorize carrier and origin/destination
-        df['OP_CARRIER'], carrierLabel = pd.factorize(df.OP_CARRIER)
-        df['ORIGIN'], originLabel = pd.factorize(df.ORIGIN)
-        df['DEST'], destLabel = pd.factorize(df.DEST)
-
-        # convert labels to numpy, save
-        carrierLabel = carrierLabel.to_numpy(dtype=str)
-        originLabel = originLabel.to_numpy(dtype=str)
-        destLabel = destLabel.to_numpy(dtype=str)
-        np.savetxt(self.datadir + 'days.txt', dayLabel)
-        np.savetxt(self.datadir + 'carriers.txt', carrierLabel, fmt='%s')
-        np.savetxt(self.datadir + 'origins.txt', originLabel, fmt='%s')
-        np.savetxt(self.datadir + 'dests.txt', destLabel, fmt='%s')
-
+        print(df.info())
         df.to_csv(self.datadir + 'dataPlot.csv')
-    '''
+        
+    def barPlot(self, df, xVar, yVar, varName=''):
 
-    def barPlot(self, x, y, n, xlabels=None, varName=''):
-        total = np.zeros(n)
+        x = df[xVar].to_numpy()
+        y = df[yVar].to_numpy()
+        xLabel = np.unique(x)
+        n = len(xLabel)
+
+        total = np.zeros(n) 
         delayed = np.zeros(n)
 
         for i in range(len(x)):
-            total[x[i]] = total[x[i]] + 1
+            ind = np.where(xLabel == x[i]) # index of the unique set
+            total[ind] = total[ind] + 1
             if y[i] == 1:
-                delayed[x[i]] = delayed[x[i]] + 1
+                delayed[ind] = delayed[ind] + 1
         prop = delayed / total
 
         plt.figure()
-        plt.bar(list(range(n)), prop, tick_label=xlabels)
+        plt.bar(list(range(n)), prop, tick_label=xLabel)
         plt.title('Flight Delays by ' + str(varName))
         plt.xlabel(varName)
         plt.ylabel('Proportion of Delayed Flights')
 
-
     def initialPlots(self):
         df = pd.read_csv(self.datadir + 'dataPlot.csv')
-        dayofweek = df.DAY_OF_WEEK.to_numpy()
-        dayofyear = df.DAY_OF_YEAR.to_numpy()
-        month = df.MONTH.to_numpy()
-        dep = df.CRS_DEP_TIME.to_numpy()
-        arr = df.CRS_ARR_TIME.to_numpy()
-        delay = df.ARR_DELAY.to_numpy()
-        carrier = df.OP_CARRIER.to_numpy()
-        carrierLabel = np.loadtxt(self.datadir + 'carriers.txt', dtype=str)
-
-        self.barPlot(dayofweek, delay, 7, varName='Day of Week')
-        self.barPlot(month, delay, 12, varName='Month')
-        self.barPlot(dep, delay, 24, varName='Departure Hour')
-        self.barPlot(arr, delay, 24, varName='Arrival Hour')
-        self.barPlot(carrier, delay, len(carrierLabel), xlabels=carrierLabel, varName='Carrier')
         
-
+        self.barPlot(df, xVar='DAY_OF_WEEK', yVar='ARR_DELAY', varName='Day of Week')
+        self.barPlot(df, xVar='MONTH', yVar='ARR_DELAY', varName='Month')
+        self.barPlot(df, xVar='CRS_DEP_TIME', yVar='ARR_DELAY', varName='Departure Hour')
+        self.barPlot(df, xVar='CRS_ARR_TIME', yVar='ARR_DELAY', varName='Arrival Hour')
+        self.barPlot(df, xVar='OP_CARRIER', yVar='ARR_DELAY', varName='Airline')
 
 
 
